@@ -12,10 +12,7 @@ const repeatModeInputs = document.querySelectorAll('input[name="repeatMode"]');
 const repeatCountContainer = document.querySelector('.repeat-count-container');
 const repeatCountInput = document.getElementById('repeatCount');
 
-let refreshInterval = null;
-let nextRefreshTime = null;
 let currentTab = null;
-let tabSettings = {};
 
 // 초기화
 document.addEventListener('DOMContentLoaded', async () => {
@@ -33,12 +30,6 @@ async function initializePopup() {
     
     // 저장된 설정 불러오기
     await loadSettings();
-    
-    // 탭별 설정 불러오기
-    await loadTabSettings();
-    
-    // 탭 목록 업데이트
-    updateTabList();
     
     // 현재 탭 상태 업데이트
     updateCurrentTabStatus();
@@ -73,89 +64,25 @@ async function loadSettings() {
     }
 }
 
-// 탭별 설정 불러오기
-async function loadTabSettings() {
-    const result = await chrome.storage.local.get(['tabSettings']);
-    tabSettings = result.tabSettings || {};
-}
-
-// 탭 목록 업데이트
-function updateTabList() {
-    pageList.innerHTML = '';
-    
-    Object.keys(tabSettings).forEach(tabId => {
-        const setting = tabSettings[tabId];
-        const tabItem = createTabItem(tabId, setting);
-        pageList.appendChild(tabItem);
-    });
-    
-    if (Object.keys(tabSettings).length === 0) {
-        pageList.innerHTML = '<p style="text-align: center; color: #718096; font-size: 12px;">설정된 탭이 없습니다.</p>';
-    }
-}
-
-// 탭 아이템 생성
-function createTabItem(tabId, setting) {
-    const tabItem = document.createElement('div');
-    tabItem.className = 'page-item';
-    if (currentTab && currentTab.id === parseInt(tabId)) {
-        tabItem.classList.add('active');
-    }
-    
-    const domain = setting.url ? new URL(setting.url).hostname : '알 수 없음';
-    const title = setting.title || domain;
-    const repeatText = setting.repeatMode === 'count' ? 
-        `(${setting.currentCount || 0}/${setting.repeatCount})` : 
-        '(무한 반복)';
-    
-    tabItem.innerHTML = `
-        <div class="page-info-text">
-            <div class="page-title">${title}</div>
-            <div class="page-url">${domain}</div>
-            <div class="page-status">${setting.isRunning ? '실행 중' : '중지됨'} (${setting.interval/1000}초) ${repeatText}</div>
-        </div>
-        <div class="page-controls">
-            <button class="btn-start" ${setting.isRunning ? 'disabled' : ''}>시작</button>
-            <button class="btn-stop" ${!setting.isRunning ? 'disabled' : ''}>중지</button>
-            <button class="btn-remove">삭제</button>
-        </div>
-    `;
-    
-    // 이벤트 리스너 추가
-    const startBtn = tabItem.querySelector('.btn-start');
-    const stopBtn = tabItem.querySelector('.btn-stop');
-    const removeBtn = tabItem.querySelector('.btn-remove');
-    
-    startBtn.addEventListener('click', () => startTabRefresh(tabId));
-    stopBtn.addEventListener('click', () => stopTabRefresh(tabId));
-    removeBtn.addEventListener('click', () => removeTabSetting(tabId));
-    
-    return tabItem;
-}
-
 // 현재 탭 상태 업데이트
-function updateCurrentTabStatus() {
+async function updateCurrentTabStatus() {
     if (!currentTab) return;
-    
-    const setting = tabSettings[currentTab.id];
-    if (setting && setting.isRunning) {
-        startBtn.disabled = true;
-        stopBtn.disabled = false;
-        statusText.textContent = '자동 새로고침 실행 중...';
-        
-        // 일시정지 상태 확인
-        if (setting.isPaused) {
-            pauseStatus.style.display = 'block';
-            statusText.textContent = '탭 활성화로 일시정지됨';
+    // background에 현재 탭 상태 요청
+    chrome.runtime.sendMessage({
+        action: 'getTabStatus',
+        tabId: currentTab.id
+    }, (response) => {
+        if (response && response.isRunning) {
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            statusText.textContent = '자동 새로고침 실행 중...';
         } else {
-            pauseStatus.style.display = 'none';
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            statusText.textContent = '대기 중...';
         }
-    } else {
-        startBtn.disabled = false;
-        stopBtn.disabled = true;
-        statusText.textContent = '대기 중...';
         pauseStatus.style.display = 'none';
-    }
+    });
 }
 
 // 이벤트 리스너 설정
@@ -176,98 +103,38 @@ function setupEventListeners() {
 // 현재 탭 새로고침 시작
 async function startCurrentTabRefresh() {
     if (!currentTab) return;
-    
     const interval = parseInt(intervalInput.value);
     if (interval < 1) {
         alert('간격은 1초 이상이어야 합니다.');
         return;
     }
-    
-    // 반복 옵션 가져오기
     const repeatMode = document.querySelector('input[name="repeatMode"]:checked').value;
     const repeatCount = repeatMode === 'count' ? parseInt(repeatCountInput.value) : 0;
-    
     if (repeatMode === 'count' && (repeatCount < 1 || repeatCount > 1000)) {
         alert('반복 횟수는 1~1000 사이여야 합니다.');
         return;
     }
-    
-    await startTabRefresh(currentTab.id, interval, repeatMode, repeatCount);
-}
-
-// 탭 새로고침 시작
-async function startTabRefresh(tabId, interval = null, repeatMode = 'infinite', repeatCount = 0) {
-    if (!interval) {
-        interval = parseInt(intervalInput.value);
-    }
-    
-    // 탭 설정 저장
-    tabSettings[tabId] = {
-        interval: interval * 1000,
-        isRunning: true,
-        isPaused: false,
-        repeatMode: repeatMode,
-        repeatCount: repeatCount,
-        currentCount: 0,
-        title: currentTab?.title || '알 수 없음',
-        url: currentTab?.url || '',
-        lastStarted: Date.now()
-    };
-    
-    await chrome.storage.local.set({ tabSettings });
-    
-    // 백그라운드에 메시지 전송
-    chrome.runtime.sendMessage({
-        action: 'startTabRefresh',
-        tabId: tabId,
-        interval: interval * 1000,
-        repeatMode: repeatMode,
-        repeatCount: repeatCount
+    await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+            action: 'startTabRefresh',
+            tabId: currentTab.id,
+            interval: interval * 1000,
+            repeatMode: repeatMode,
+            repeatCount: repeatCount
+        }, resolve);
     });
-    
-    // UI 업데이트
-    updateTabList();
     updateCurrentTabStatus();
 }
 
 // 현재 탭 새로고침 중지
 async function stopCurrentTabRefresh() {
     if (!currentTab) return;
-    await stopTabRefresh(currentTab.id);
-}
-
-// 탭 새로고침 중지
-async function stopTabRefresh(tabId) {
-    if (tabSettings[tabId]) {
-        tabSettings[tabId].isRunning = false;
-        tabSettings[tabId].isPaused = false;
-        await chrome.storage.local.set({ tabSettings });
-    }
-    
-    // 백그라운드에 메시지 전송
-    chrome.runtime.sendMessage({
-        action: 'stopTabRefresh',
-        tabId: tabId
+    await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+            action: 'stopTabRefresh',
+            tabId: currentTab.id
+        }, resolve);
     });
-    
-    // UI 업데이트
-    updateTabList();
-    updateCurrentTabStatus();
-}
-
-// 탭 설정 삭제
-async function removeTabSetting(tabId) {
-    delete tabSettings[tabId];
-    await chrome.storage.local.set({ tabSettings });
-    
-    // 백그라운드에 메시지 전송
-    chrome.runtime.sendMessage({
-        action: 'removeTabSetting',
-        tabId: tabId
-    });
-    
-    // UI 업데이트
-    updateTabList();
     updateCurrentTabStatus();
 }
 
@@ -295,18 +162,13 @@ async function saveDefaultSettings() {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     switch (message.action) {
         case 'refreshComplete':
-            // 탭 목록 업데이트 (반복 횟수 변경 반영)
-            updateTabList();
+            updateCurrentTabStatus();
             break;
         case 'tabPaused':
             updateCurrentTabStatus();
-            updateTabList();
             break;
         case 'tabResumed':
             updateCurrentTabStatus();
-            updateTabList();
             break;
     }
 });
-
- 

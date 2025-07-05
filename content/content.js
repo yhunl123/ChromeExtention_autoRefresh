@@ -4,20 +4,28 @@ console.log('Auto Refresh 콘텐츠 스크립트가 로드되었습니다.');
 // 윈도우 포커스/블러 이벤트 리스너 추가
 window.addEventListener('focus', () => {
     console.log('윈도우 포커스됨');
-    chrome.runtime.sendMessage({
-        action: 'windowFocused',
-        url: window.location.href,
-        timestamp: Date.now()
-    });
+    try {
+        chrome.runtime.sendMessage({
+            action: 'windowFocused',
+            url: window.location.href,
+            timestamp: Date.now()
+        });
+    } catch (e) {
+        console.log('sendMessage error:', e);
+    }
 });
 
 window.addEventListener('blur', () => {
     console.log('윈도우 블러됨');
-    chrome.runtime.sendMessage({
-        action: 'windowBlurred',
-        url: window.location.href,
-        timestamp: Date.now()
-    });
+    try {
+        chrome.runtime.sendMessage({
+            action: 'windowBlurred',
+            url: window.location.href,
+            timestamp: Date.now()
+        });
+    } catch (e) {
+        console.log('sendMessage error:', e);
+    }
 });
 
 // 페이지 로드 완료 시 백그라운드에 알림
@@ -71,8 +79,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     }
 });
-
-
 
 // 페이지 성능 정보 수집 (선택사항)
 function collectPerformanceInfo() {

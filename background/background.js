@@ -11,7 +11,7 @@ let badgeUpdateTimer = null; // 배지 업데이트 타이머
 // 윈도우 포커스 처리
 async function handleWindowFocus(tabId) {
     const setting = tabSettings.get(tabId);
-    if (setting && setting.isRunning && !setting.isPaused) {
+    if (setting && setting.isRunning) {
         await pauseTabRefresh(tabId);
     }
     await updateActionBadge(tabId);
@@ -20,7 +20,7 @@ async function handleWindowFocus(tabId) {
 // 윈도우 블러 처리
 async function handleWindowBlur(tabId) {
     const setting = tabSettings.get(tabId);
-    if (setting && setting.isRunning && setting.isPaused) {
+    if (setting && setting.isRunning) {
         await resumeTabRefresh(tabId);
     }
     await updateActionBadge(tabId);
@@ -30,23 +30,32 @@ async function handleWindowBlur(tabId) {
 
 // 통합된 메시지 리스너
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    // 윈도우 포커스/블러 이벤트 처리
-    if (message.action === 'windowFocused') {
-        handleWindowFocus(sender.tab.id);
-        return false;
-    } else if (message.action === 'windowBlurred') {
-        handleWindowBlur(sender.tab.id);
-        return false;
+    if (message.action === 'getTabStatus') {
+        const setting = tabSettings.get(message.tabId);
+        sendResponse && sendResponse({ isRunning: !!(setting && setting.isRunning) });
+        return true;
     }
-    
-    // 기존 새로고침 관련 액션 처리
+    if (message.action === 'windowFocused') {
+        handleWindowFocus(sender.tab?.id);
+        sendResponse && sendResponse({ result: 'ok' });
+        return true;
+    } else if (message.action === 'windowBlurred') {
+        handleWindowBlur(sender.tab?.id);
+        sendResponse && sendResponse({ result: 'ok' });
+        return true;
+    }
     const actions = {
         startTabRefresh: () => startTabRefresh(message.tabId, message.interval, message.repeatMode, message.repeatCount),
         stopTabRefresh: () => stopTabRefresh(message.tabId),
         removeTabSetting: () => removeTabSetting(message.tabId),
     };
     const action = actions[message.action];
-    if (action) action();
+    if (action) {
+        Promise.resolve(action()).then(() => {
+            sendResponse && sendResponse({ result: 'ok' });
+        });
+        return true;
+    }
     return false;
 });
 
@@ -103,7 +112,9 @@ async function refreshTab(tabId) {
                 return;
             }
         }
-        chrome.runtime.sendMessage({ action: 'refreshComplete', tabId });
+        try {
+            chrome.runtime.sendMessage({ action: 'refreshComplete', tabId });
+        } catch (e) {}
     } catch (error) {
         await removeTabSetting(tabId);
     }
@@ -118,7 +129,9 @@ async function pauseTabRefresh(tabId) {
         tabTimers.delete(tabId);
     }
     console.log(`탭 일시정지: ${tabId}`);
-    chrome.runtime.sendMessage({ action: 'tabPaused', tabId });
+    try {
+        chrome.runtime.sendMessage({ action: 'tabPaused', tabId });
+    } catch (e) {}
     await updateTabSettings();
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (activeTab && tabId === activeTab.id) await updateActionBadge(activeTab.id);
@@ -132,7 +145,9 @@ async function resumeTabRefresh(tabId) {
     const timerId = setInterval(() => refreshTab(tabId), setting.interval);
     tabTimers.set(tabId, timerId);
     console.log(`탭 재시작: ${tabId}`);
-    chrome.runtime.sendMessage({ action: 'tabResumed', tabId });
+    try {
+        chrome.runtime.sendMessage({ action: 'tabResumed', tabId });
+    } catch (e) {}
     await updateTabSettings();
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (activeTab && tabId === activeTab.id) await updateActionBadge(activeTab.id);
@@ -146,23 +161,20 @@ async function updateTabSettings() {
     await chrome.storage.local.set({ tabSettings: settings });
 }
 
-async function updateActionBadge(activeTabId) {
-    if (activeTabId === null) {
-        await chrome.action.setBadgeText({ text: '' });
-        return;
-    }
-    const setting = tabSettings.get(activeTabId);
+async function updateActionBadge(tabId) {
+    if (tabId === null || tabId === undefined) return;
+    const setting = tabSettings.get(tabId);
     if (setting && setting.isRunning) {
         if (setting.isPaused) {
-            await chrome.action.setBadgeText({ text: '❚❚' });
-            await chrome.action.setBadgeBackgroundColor({ color: '#edac2c' });
+            await chrome.action.setBadgeText({ text: '❚❚', tabId });
+            await chrome.action.setBadgeBackgroundColor({ color: '#edac2c', tabId });
         } else {
             const remaining = Math.max(0, Math.round((setting.lastRefresh + setting.interval - Date.now()) / 1000));
-            await chrome.action.setBadgeText({ text: `${remaining}s` });
-            await chrome.action.setBadgeBackgroundColor({ color: '#3ba55d' });
+            await chrome.action.setBadgeText({ text: `${remaining}s`, tabId });
+            await chrome.action.setBadgeBackgroundColor({ color: '#3ba55d', tabId });
         }
     } else {
-        await chrome.action.setBadgeText({ text: '' });
+        await chrome.action.setBadgeText({ text: '', tabId });
     }
 }
 
@@ -190,16 +202,19 @@ async function loadSavedSettings() {
 
 async function initialize() {
     await loadSavedSettings();
-    // 초기화 시, 현재 활성 탭의 배지 업데이트
-    const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    if (activeTab) {
-        await updateActionBadge(activeTab.id);
+    // 모든 자동 새로고침 탭에 배지 업데이트
+    for (const [tabId, setting] of tabSettings) {
+        if (setting.isRunning) {
+            await updateActionBadge(Number(tabId));
+        }
     }
-
     if (badgeUpdateTimer) clearInterval(badgeUpdateTimer);
     badgeUpdateTimer = setInterval(async () => {
-        const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-        if (activeTab) await updateActionBadge(activeTab.id);
+        for (const [tabId, setting] of tabSettings) {
+            if (setting.isRunning) {
+                await updateActionBadge(Number(tabId));
+            }
+        }
     }, 1000);
 }
 
@@ -210,4 +225,3 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     }
     initialize();
 });
-''
