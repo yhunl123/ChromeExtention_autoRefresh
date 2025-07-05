@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto Refresh</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Auto Refresh</h1>
+        
+        <div class="page-info">
+            <p id="currentPage">현재 페이지: 로딩 중...</p>
+        </div>
+        
+        <div class="control-group">
+            <label for="interval">새로고침 간격 (초):</label>
+            <input type="number" id="interval" min="1" max="3600" value="30">
+        </div>
+        
+        <div class="control-group">
+            <label>반복 옵션:</label>
+            <div class="repeat-options">
+                <label class="radio-option">
+                    <input type="radio" name="repeatMode" value="infinite" checked>
+                    <span>무한 반복</span>
+                </label>
+                <label class="radio-option">
+                    <input type="radio" name="repeatMode" value="count">
+                    <span>횟수 지정</span>
+                </label>
+            </div>
+            <div class="repeat-count-container" style="display: none;">
+                <label for="repeatCount">반복 횟수:</label>
+                <input type="number" id="repeatCount" min="1" max="1000" value="10">
+            </div>
+        </div>
+        
+        <div class="control-group">
+            <button id="startBtn" class="btn btn-primary">시작</button>
+            <button id="stopBtn" class="btn btn-secondary" disabled>중지</button>
+        </div>
+        
+        <div class="status">
+            <p id="statusText">대기 중...</p>
+            <p id="nextRefresh">다음 새로고침: -</p>
+            <p id="pauseStatus" class="pause-info" style="display: none;">페이지 활성화로 인해 일시정지됨</p>
+        </div>
+        
+        <div class="options">
+            <label>
+                <input type="checkbox" id="enableSound"> 소리 알림
+            </label>
+        </div>
+        
+        <div class="page-settings">
+            <h3>탭별 설정</h3>
+            <div id="pageList" class="page-list">
+                <!-- 탭 목록이 여기에 표시됩니다 -->
+            </div>
+        </div>
+    </div>
+    
+    <script src="popup.js"></script>
+</body>
+</html> 
