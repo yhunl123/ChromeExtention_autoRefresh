@@ -5,67 +5,41 @@ let badgeUpdateTimer = null; // 배지 업데이트 타이머
 
 // --- Event Listeners for Activity Changes ---
 
-// 1. 사용자가 창 포커스를 변경할 때 (가장 중요한 로직)
-chrome.windows.onFocusChanged.addListener(async (focusedWindowId) => {
-    // 모든 실행중인 탭을 순회하며 상태를 재평가
-    for (const tabId of tabSettings.keys()) {
-        const setting = tabSettings.get(tabId);
-        if (!setting || !setting.isRunning) continue;
+// 1. Content Script에서 보내는 윈도우 포커스/블러 이벤트 처리
+// (메시지 리스너는 아래 Core Refresh Functions 섹션에서 통합 처리됨)
 
-        try {
-            const tab = await chrome.tabs.get(tabId);
-            // 일시정지 조건: 탭이 활성상태이고, 그 탭의 창이 방금 포커스된 창일 때
-            const shouldBePaused = tab.active && tab.windowId === focusedWindowId;
-            
-            if (shouldBePaused && !setting.isPaused) {
-                await pauseTabRefresh(tabId);
-            } else if (!shouldBePaused && setting.isPaused) {
-                await resumeTabRefresh(tabId);
-            }
-        } catch (e) {
-            // 탭이 닫혔을 수 있음
-        }
-    }
-
-    // 포커스된 창의 활성 탭 기준으로 배지 업데이트
-    if (focusedWindowId !== chrome.windows.WINDOW_ID_NONE) {
-        const [activeTab] = await chrome.tabs.query({ active: true, windowId: focusedWindowId });
-        if (activeTab) await updateActionBadge(activeTab.id);
-    } else {
-        await chrome.action.setBadgeText({ text: '' });
-    }
-});
-
-// 2. 사용자가 창 내에서 탭을 전환할 때
-chrome.tabs.onActivated.addListener(async (activeInfo) => {
-    const { tabId, windowId } = activeInfo;
-
-    // 새로 활성화된 탭은 일시정지 될 수 있음
-    const newActiveTabSetting = tabSettings.get(tabId);
-    if (newActiveTabSetting && newActiveTabSetting.isRunning) {
+// 윈도우 포커스 처리
+async function handleWindowFocus(tabId) {
+    const setting = tabSettings.get(tabId);
+    if (setting && setting.isRunning && !setting.isPaused) {
         await pauseTabRefresh(tabId);
     }
+    await updateActionBadge(tabId);
+}
 
-    // 같은 창의 다른 탭들은 이제 비활성이므로 재개될 수 있음
-    for (const otherTabId of tabSettings.keys()) {
-        if (otherTabId === tabId) continue;
-        const setting = tabSettings.get(otherTabId);
-        if (setting && setting.isRunning && setting.isPaused) {
-            try {
-                const tab = await chrome.tabs.get(otherTabId);
-                if (tab.windowId === windowId) {
-                    await resumeTabRefresh(otherTabId);
-                }
-            } catch (e) {}
-        }
+// 윈도우 블러 처리
+async function handleWindowBlur(tabId) {
+    const setting = tabSettings.get(tabId);
+    if (setting && setting.isRunning && setting.isPaused) {
+        await resumeTabRefresh(tabId);
     }
     await updateActionBadge(tabId);
-});
-
+}
 
 // --- Core Refresh Functions ---
 
+// 통합된 메시지 리스너
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // 윈도우 포커스/블러 이벤트 처리
+    if (message.action === 'windowFocused') {
+        handleWindowFocus(sender.tab.id);
+        return false;
+    } else if (message.action === 'windowBlurred') {
+        handleWindowBlur(sender.tab.id);
+        return false;
+    }
+    
+    // 기존 새로고침 관련 액션 처리
     const actions = {
         startTabRefresh: () => startTabRefresh(message.tabId, message.interval, message.repeatMode, message.repeatCount),
         stopTabRefresh: () => stopTabRefresh(message.tabId),
@@ -89,14 +63,6 @@ async function startTabRefresh(tabId, interval, repeatMode = 'infinite', repeatC
     console.log(`탭 새로고침 시작: ${tabId}`);
     
     await updateTabSettings();
-    // 시작 직후, 이 탭이 활성/포커스 상태인지 바로 확인하여 일시정지 처리
-    try {
-        const tab = await chrome.tabs.get(tabId);
-        const window = await chrome.windows.get(tab.windowId);
-        if (tab.active && window.focused) {
-            await pauseTabRefresh(tabId);
-        }
-    } catch(e) {}
     await updateActionBadge(tabId);
 }
 
@@ -224,13 +190,10 @@ async function loadSavedSettings() {
 
 async function initialize() {
     await loadSavedSettings();
-    // 초기화 시, 현재 활성/포커스된 탭 상태를 확인
+    // 초기화 시, 현재 활성 탭의 배지 업데이트
     const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (activeTab) {
-        const window = await chrome.windows.get(activeTab.windowId);
-        if (window.focused) {
-            await pauseTabRefresh(activeTab.id);
-        }
+        await updateActionBadge(activeTab.id);
     }
 
     if (badgeUpdateTimer) clearInterval(badgeUpdateTimer);
@@ -243,7 +206,7 @@ async function initialize() {
 chrome.runtime.onStartup.addListener(initialize);
 chrome.runtime.onInstalled.addListener(async (details) => {
     if (details.reason === 'install') {
-        await chrome.storage.local.set({ defaultInterval: 30, enableSound: true, tabSettings: {} });
+        await chrome.storage.local.set({ defaultInterval: 30, tabSettings: {} });
     }
     initialize();
 });

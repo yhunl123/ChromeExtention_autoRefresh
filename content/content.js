@@ -1,6 +1,25 @@
 // 콘텐츠 스크립트 - 웹페이지에서 실행됨
 console.log('Auto Refresh 콘텐츠 스크립트가 로드되었습니다.');
 
+// 윈도우 포커스/블러 이벤트 리스너 추가
+window.addEventListener('focus', () => {
+    console.log('윈도우 포커스됨');
+    chrome.runtime.sendMessage({
+        action: 'windowFocused',
+        url: window.location.href,
+        timestamp: Date.now()
+    });
+});
+
+window.addEventListener('blur', () => {
+    console.log('윈도우 블러됨');
+    chrome.runtime.sendMessage({
+        action: 'windowBlurred',
+        url: window.location.href,
+        timestamp: Date.now()
+    });
+});
+
 // 페이지 로드 완료 시 백그라운드에 알림
 document.addEventListener('DOMContentLoaded', () => {
     // 백그라운드 스크립트에 페이지 로드 완료 메시지 전송
@@ -49,89 +68,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
             break;
             
-        case 'showNotification':
-            // 페이지에 알림 표시 (선택사항)
-            showPageNotification(message.text);
-            break;
+
     }
 });
 
-// 페이지에 알림 표시하는 함수
-function showPageNotification(text) {
-    // 기존 알림이 있다면 제거
-    const existingNotification = document.getElementById('auto-refresh-notification');
-    if (existingNotification) {
-        existingNotification.remove();
-    }
-    
-    // 새 알림 생성
-    const notification = document.createElement('div');
-    notification.id = 'auto-refresh-notification';
-    notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 15px 20px;
-        border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        z-index: 10000;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        font-size: 14px;
-        max-width: 300px;
-        animation: slideIn 0.3s ease;
-    `;
-    
-    notification.textContent = text;
-    
-    // 애니메이션 CSS 추가
-    const style = document.createElement('style');
-    style.textContent = `
-        @keyframes slideIn {
-            from {
-                transform: translateX(100%);
-                opacity: 0;
-            }
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
-        }
-    `;
-    document.head.appendChild(style);
-    
-    // 알림을 페이지에 추가
-    document.body.appendChild(notification);
-    
-    // 3초 후 자동 제거
-    setTimeout(() => {
-        if (notification.parentNode) {
-            notification.style.animation = 'slideOut 0.3s ease';
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.remove();
-                }
-            }, 300);
-        }
-    }, 3000);
-    
-    // slideOut 애니메이션 추가
-    const slideOutStyle = document.createElement('style');
-    slideOutStyle.textContent = `
-        @keyframes slideOut {
-            from {
-                transform: translateX(0);
-                opacity: 1;
-            }
-            to {
-                transform: translateX(100%);
-                opacity: 0;
-            }
-        }
-    `;
-    document.head.appendChild(slideOutStyle);
-}
+
 
 // 페이지 성능 정보 수집 (선택사항)
 function collectPerformanceInfo() {

@@ -5,7 +5,7 @@ const stopBtn = document.getElementById('stopBtn');
 const statusText = document.getElementById('statusText');
 const nextRefresh = document.getElementById('nextRefresh');
 const pauseStatus = document.getElementById('pauseStatus');
-const enableSound = document.getElementById('enableSound');
+
 const currentPage = document.getElementById('currentPage');
 const pageList = document.getElementById('pageList');
 const repeatModeInputs = document.querySelectorAll('input[name="repeatMode"]');
@@ -57,14 +57,10 @@ function updateCurrentPageInfo() {
 
 // 설정 불러오기
 async function loadSettings() {
-    const result = await chrome.storage.local.get(['defaultInterval', 'enableSound', 'defaultRepeatMode', 'defaultRepeatCount']);
+    const result = await chrome.storage.local.get(['defaultInterval', 'defaultRepeatMode', 'defaultRepeatCount']);
     
     if (result.defaultInterval) {
         intervalInput.value = result.defaultInterval;
-    }
-    
-    if (result.enableSound !== undefined) {
-        enableSound.checked = result.enableSound;
     }
     
     if (result.defaultRepeatMode) {
@@ -167,7 +163,7 @@ function setupEventListeners() {
     startBtn.addEventListener('click', startCurrentTabRefresh);
     stopBtn.addEventListener('click', stopCurrentTabRefresh);
     intervalInput.addEventListener('change', saveDefaultSettings);
-    enableSound.addEventListener('change', saveDefaultSettings);
+
     
     // 반복 옵션 이벤트 리스너
     repeatModeInputs.forEach(input => {
@@ -290,7 +286,6 @@ function handleRepeatModeChange() {
 async function saveDefaultSettings() {
     await chrome.storage.local.set({
         defaultInterval: parseInt(intervalInput.value),
-        enableSound: enableSound.checked,
         defaultRepeatMode: document.querySelector('input[name="repeatMode"]:checked').value,
         defaultRepeatCount: parseInt(repeatCountInput.value)
     });
@@ -300,9 +295,6 @@ async function saveDefaultSettings() {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     switch (message.action) {
         case 'refreshComplete':
-            if (enableSound.checked) {
-                playNotificationSound();
-            }
             // 탭 목록 업데이트 (반복 횟수 변경 반영)
             updateTabList();
             break;
@@ -317,8 +309,4 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
-// 알림 소리 재생
-function playNotificationSound() {
-    const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OScTgwOUarm7blmGgU7k9n1unEiBC13yO/eizEIHWq+8+OWT');
-    audio.play().catch(e => console.log('소리 재생 실패:', e));
-} 
+ 
